@@ -11,6 +11,9 @@ protocol SchemeInfoProviderProtocol {
     /// The modules to ignore.
     var modulesToIgnore: Set<String> { get }
 
+    /// The Xcode SDK to use (iphonesimulator or iphoneos).
+    var sdk: String? { get }
+
     /// Retrieves .pbxproj targets from the relevant Xcode project by building it.
     func getModulesFromProject() throws -> [Module]
 

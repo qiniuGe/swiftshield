@@ -6,6 +6,7 @@ struct SchemeInfoProvider: SchemeInfoProviderProtocol {
     let taskRunner: TaskRunnerProtocol
     let logger: LoggerProtocol
     let modulesToIgnore: Set<String>
+    let sdk: String?
 
     var isWorkspace: Bool {
         projectFile.path.hasSuffix(".xcworkspace")
@@ -18,8 +19,15 @@ struct SchemeInfoProvider: SchemeInfoProviderProtocol {
         logger.log("--- Building project to retrieve compiler arguments.")
         let command = "/usr/bin/xcodebuild"
         let projectParameter = isWorkspace ? "-workspace" : "-project"
+        let projectPath = isWorkspace
+            ? projectFile.path.replacingOccurrences(of: ".xcodeproj", with: ".xcworkspace")
+            : projectFile.path
+        let sdkValue = sdk ?? "iphoneos"
+        let destinationValue = sdkValue == "iphonesimulator" ? "generic/platform=iOS Simulator" : "generic/platform=iOS"
         let arguments: [String] = [
-            projectParameter, projectFile.path, "-scheme", schemeName, "-sdk", "iphonesimulator", "clean", "build",
+            projectParameter, projectPath, "-scheme", schemeName, "-sdk", sdkValue, "-destination", destinationValue,
+            "ARCHS=arm64",
+            "clean", "build",
         ]
 
         let result = taskRunner.runTask(withCommand: command, arguments: arguments)

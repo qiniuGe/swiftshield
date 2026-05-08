@@ -6,14 +6,18 @@ final class SourceKitObfuscator: ObfuscatorProtocol {
     let dataStore: SourceKitObfuscatorDataStore
     let ignorePublic: Bool
     let namesToIgnore: Set<String>
+    /// 白名单：仅混淆此集合中的名称。若为 nil，则按黑名单模式工作（namesToIgnore 之外的都混淆）。
+    let obfuscateOnlyNames: Set<String>?
     weak var delegate: ObfuscatorDelegate?
 
-    init(sourceKit: SourceKit, logger: LoggerProtocol, dataStore: SourceKitObfuscatorDataStore, namesToIgnore: Set<String>, ignorePublic: Bool) {
+    init(sourceKit: SourceKit, logger: LoggerProtocol, dataStore: SourceKitObfuscatorDataStore,
+         namesToIgnore: Set<String>, ignorePublic: Bool, obfuscateOnlyNames: Set<String>?) {
         self.sourceKit = sourceKit
         self.logger = logger
         self.dataStore = dataStore
         self.ignorePublic = ignorePublic
         self.namesToIgnore = namesToIgnore
+        self.obfuscateOnlyNames = obfuscateOnlyNames
     }
 
     var requests: sourcekitd_requests! {
@@ -97,6 +101,20 @@ extension SourceKitObfuscator {
         ofFile file: File,
         fromModule module: Module
     ) throws {
+        // 过滤：跳过非 .swift 源文件的声明（如 DerivedData 中的 GeneratedAssetSymbols.swift
+        // 产生的 ColorResource/ImageResource 等自动生成的符号）
+        let filePath = file.path
+        let fileExt = (filePath as NSString).pathExtension.lowercased()
+        let isSwiftSource = fileExt == "swift"
+        // 进一步过滤：排除路径中包含 DerivedData/build 等构建产物目录的文件
+        let isInBuildProduct = filePath.contains("DerivedData") ||
+                               filePath.contains("/.build/") ||
+                               filePath.contains("generated_files") ||
+                               filePath.contains("GeneratedAssetSymbols")
+        if !isSwiftSource || isInBuildProduct {
+            logger.log("* Skipping: \(file.name) (isSwiftSource=\(isSwiftSource), isBuildProduct=\(isInBuildProduct))", verbose: true)
+            return
+        }
         let entityKind: SKUID = dict[keys.kind]!
         logger.log("DEBUG process: kind=\(entityKind.description) name=\(dict[keys.name] ?? "nil") usr=\(dict[keys.usr] ?? "nil")")
         guard let kind = entityKind.declarationType() else {
@@ -126,7 +144,17 @@ extension SourceKitObfuscator {
             logger.log("* Ignoring \(name) (USR: \(usr)) because its included in ignore-names", verbose: true)
             return
         }
-        
+
+        // ── 白名单模式：若设置了 obfuscateOnlyNames，则只混淆白名单中的名称 ──
+        if let whitelist = obfuscateOnlyNames {
+            if !whitelist.contains(name) {
+                logger.log(
+                    "* Ignoring \(name) (USR: \(usr)) because it's not in the obfuscate-only whitelist",
+                    verbose: true)
+                return
+            }
+        }
+
         if kind == .enumelement, let parentUSR: String = dict.parent[keys.usr] {
             let codingKeysUSR: Set<String> = ["s:s9CodingKeyP"]
             if try inheritsFromAnyUSR(
@@ -183,7 +211,56 @@ extension SourceKitObfuscator {
         try dataStore.plists.forEach { plist in
             try obfuscate(plist: plist)
         }
+        try obfuscateAllStoryboards()
         return ConversionMap(obfuscationDictionary: dataStore.obfuscationDictionary)
+    }
+
+    /// 扫描所有已索引源文件目录，收集 .storyboard 文件并混淆其中的 customClass
+    private func obfuscateAllStoryboards() throws {
+        let storyboardPaths = dataStore.indexedFiles.map { $0.file.path }
+        var processedDirs = Set<String>()
+        for sourcePath in storyboardPaths {
+            let dir = (sourcePath as NSString).deletingLastPathComponent
+            if processedDirs.contains(dir) { continue }
+            processedDirs.insert(dir)
+            // 在源文件同级目录及 Base.lproj 子目录中查找 storyboard
+            let searchDirs = [dir, dir + "/Base.lproj"]
+            for searchDir in searchDirs {
+                guard let contents = try? FileManager.default.contentsOfDirectory(atPath: searchDir) else { continue }
+                for name in contents where name.hasSuffix(".storyboard") {
+                    let fullPath = (searchDir as NSString).appendingPathComponent(name)
+                    let file = File(path: fullPath)
+                    try obfuscate(storyboard: file)
+                }
+            }
+        }
+    }
+
+    /// 混淆 storyboard XML 中的 customClass 属性
+    /// 替换 customClass="OriginalName" → customClass="混淆后的名称"
+    func obfuscate(storyboard: File) throws {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: storyboard.path)),
+              var content = String(data: data, encoding: .utf8) else {
+            return
+        }
+
+        logger.log("--- Checking storyboard: \(storyboard.name)")
+        var updated = false
+
+        // 遍历混淆字典，替换所有被混淆的 customClass
+        for (originalName, obfuscatedName) in dataStore.obfuscationDictionary {
+            let oldAttr = "customClass=\"\(originalName)\""
+            let newAttr = "customClass=\"\(obfuscatedName)\""
+            if content.contains(oldAttr) {
+                content = content.replacingOccurrences(of: oldAttr, with: newAttr)
+                updated = true
+                logger.log("* Updated storyboard customClass: \(originalName) → \(obfuscatedName)")
+            }
+        }
+
+        if updated, let error = delegate?.obfuscator(self, didObfuscateFile: storyboard, newContents: content) {
+            throw error
+        }
     }
 
     func obfuscate(index: IndexedFile) throws {

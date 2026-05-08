@@ -23,11 +23,18 @@ extension Swiftshield {
         @Option(name: .shortAndLong, help: "A list of names, separated by a comma, that should NOT be obfuscated.")
         var ignoreNames: String?
 
+        @Option(name: .long,
+                help: "A list of names, separated by a comma, that should ONLY be obfuscated. All other names will be kept unchanged.")
+        var obfuscateOnlyNames: String?
+
         @Flag(help: "Don't obfuscate content that is 'public' or 'open' (a.k.a 'SDK Mode').")
         var ignorePublic: Bool
 
         @Flag(name: .shortAndLong, help: "Prints additional information.")
         var verbose: Bool
+
+        @Option(name: .shortAndLong, help: "Xcode SDK to use: iphoneos (device) or iphonesimulator (simulator).")
+        var sdk: String?
 
         @Flag(name: .shortAndLong, help: "Does not actually overwrite the files.")
         var dryRun: Bool
@@ -45,7 +52,9 @@ extension Swiftshield {
                 ignorePublic: ignorePublic,
                 dryRun: dryRun,
                 verbose: verbose,
-                printSourceKitQueries: printSourcekit
+                printSourceKitQueries: printSourcekit,
+                sdk: sdk,
+                obfuscateOnlyNames: obfuscateOnlyNames.map { Set($0.components(separatedBy: ",")) }
             )
             try runner.run()
         }
