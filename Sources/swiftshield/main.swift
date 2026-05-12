@@ -69,9 +69,12 @@ extension Swiftshield {
         @Option(name: [.long, .customShort("m")], help: "The path to the previously generated conversion map.")
         var conversionMap: String
 
+        @Option(name: [.shortAndLong, .customShort("o")], help: "The path to write the deobfuscated crash log. If not provided, the original crash file will be overwritten.")
+        var output: String?
+
         func run() throws {
             let runner = Deobfuscator()
-            try runner.deobfuscate(crashFilePath: crashFile, mapPath: conversionMap)
+            try runner.deobfuscate(crashFilePath: crashFile, mapPath: conversionMap, outputPath: output)
         }
     }
 }

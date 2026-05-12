@@ -43,7 +43,7 @@ public struct Logger: LoggerProtocol {
         if sourceKit && !printSourceKit {
             return
         }
-        guard verbose == false || self.verbose else {
+        guard !verbose || self.verbose else {
             return
         }
         print(message)

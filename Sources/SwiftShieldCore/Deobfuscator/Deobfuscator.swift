@@ -7,7 +7,7 @@ public struct Deobfuscator {
         self.logger = logger
     }
 
-    public func deobfuscate(crashFilePath: String, mapPath: String) throws {
+    public func deobfuscate(crashFilePath: String, mapPath: String, outputPath: String? = nil) throws {
         let crashFile = File(path: crashFilePath)
         let crash = try crashFile.read()
         let mapString = try File(path: mapPath).read()
@@ -15,7 +15,13 @@ public struct Deobfuscator {
             throw logger.fatalError(forMessage: "Failed to parse conversion map. Have you passed the correct file?")
         }
         let result = replace(crashLog: crash, withContentsOfMap: map)
-        try crashFile.write(contents: result)
+        if let outputPath = outputPath {
+            let outputFile = File(path: outputPath)
+            try outputFile.write(contents: result)
+            logger.log("Deobfuscated crash log written to: \(outputPath)")
+        } else {
+            try crashFile.write(contents: result)
+        }
     }
 
     func replace(crashLog content: String, withContentsOfMap map: ConversionMap) -> String {
